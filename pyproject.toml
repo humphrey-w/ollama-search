@@ -9,7 +9,9 @@ authors = [{name = "Humphrey Waititu", email = "hwaititu@gmail.com"}]
 description = "A CLI bridge between Ollama and web search engines."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "python-dotenv>=1.0",
+]
 
 [project.optional-dependencies]
 dev = [
