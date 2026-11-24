@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ollama_web_search"
+version = "0.1.0"
+authors = [{name = "Humphrey Waititu", email = "hwaititu@gmail.com"}]
+description = "A CLI bridge between Ollama and web search engines."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+ask = "ollama_web_search.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ollama_web_search"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
