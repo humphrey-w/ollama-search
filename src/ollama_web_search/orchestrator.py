@@ -5,7 +5,7 @@ from typing import Any, Iterator
 
 from ollama_web_search import ollama_client
 from ollama_web_search.config import DEFAULT_MODEL, SYSTEM_PROMPT
-from ollama_web_search.tools import create_tool_dispatcher, ToolDispatcher
+from ollama_web_search.tools import ToolDispatcher, create_tool_dispatcher
 
 
 class Orchestrator:
@@ -18,16 +18,24 @@ class Orchestrator:
     ) -> None:
         self.model = model
         self.enable_search = enable_search
-        self.dispatcher = dispatcher or (
-            create_tool_dispatcher() if enable_search else None
-        )
+        self.dispatcher = dispatcher or create_tool_dispatcher()
         self.messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT}
         ]
 
+    def reset(self) -> None:
+        """Clear conversation history while keeping the system prompt."""
+        self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    @property
+    def turn_count(self) -> int:
+        """Return the number of user turns in the current session."""
+        return sum(1 for m in self.messages if m.get("role") == "user")
+
     def run_turn(self, user_prompt: str) -> Iterator[str]:
-        """Run a single turn of interaction: send the user prompt to the
-        model, handle tool invocations."""
+        """Run a single turn of interaction: send the user prompt to the model,
+        handle tool invocations, and yield the model's response."""
+        checkpoint = len(self.messages)
         self.messages.append({"role": "user", "content": user_prompt})
 
         active_schemas = (
@@ -36,52 +44,61 @@ class Orchestrator:
             else None
         )
 
-        # Pass 1: Evaluate whether the model wants to invoke a tool
-        response_msg = ollama_client.chat(
-            messages=self.messages,
-            model=self.model,
-            tools=active_schemas,
-            stream=False,
-        )
-        assert isinstance(response_msg, dict)
-        self.messages.append(response_msg)
-
-        tool_calls = response_msg.get("tool_calls") or []
-        if not tool_calls or not self.dispatcher:
-            direct_reply = response_msg.get("content", "")
-            if direct_reply:
-                yield direct_reply
-            return
-
-        # Execute each requested tool call via ToolDispatcher
-        for call in tool_calls:
-            fn = call.get("function", {})
-            name = fn.get("name", "")
-            args = fn.get("arguments", {})
-
-            query_preview = (
-                args.get("query", str(args))
-                if isinstance(args, dict)
-                else str(args)
+        try:
+            # Pass 1: Evaluate whether the model wants to invoke a tool
+            response_msg = ollama_client.chat(
+                messages=self.messages,
+                model=self.model,
+                tools=active_schemas,
+                stream=False,
             )
-            print(f"\033[90m[Searching: {query_preview}...]\033[0m",
-                  file=sys.stderr)
+            assert isinstance(response_msg, dict)
+            self.messages.append(response_msg)
 
-            tool_output = self.dispatcher.dispatch(name, args)
-            self.messages.append({"role": "tool", "content": tool_output})
+            tool_calls = response_msg.get("tool_calls") or []
+            if not tool_calls or not self.dispatcher:
+                direct_reply = response_msg.get("content", "")
+                if direct_reply:
+                    yield direct_reply
+                return
 
-        # Pass 2: Stream final answer grounded in tool results
-        token_stream = ollama_client.chat(
-            messages=self.messages,
-            model=self.model,
-            tools=None,
-            stream=True,
-        )
-        full_reply: list[str] = []
-        for token in token_stream:
-            full_reply.append(token)
-            yield token
+            # Execute each requested tool call
+            for call in tool_calls:
+                fn = call.get("function", {})
+                name = fn.get("name", "")
+                args = fn.get("arguments", {})
 
-        self.messages.append(
-            {"role": "assistant", "content": "".join(full_reply)}
-        )
+                query_preview = (
+                    args.get("query", str(args))
+                    if isinstance(args, dict)
+                    else str(args)
+                )
+                print(
+                    f"\033[90m[Searching: {query_preview}...]\033[0m",
+                    file=sys.stderr,
+                )
+
+                tool_output = self.dispatcher.dispatch(name, args)
+                self.messages.append({"role": "tool", "content": tool_output})
+
+            # Pass 2: Stream final answer grounded in tool results
+            token_stream = ollama_client.chat(
+                messages=self.messages,
+                model=self.model,
+                tools=None,
+                stream=True,
+            )
+            full_reply: list[str] = []
+            for token in token_stream:
+                full_reply.append(token)
+                yield token
+
+            self.messages.append(
+                {"role": "assistant", "content": "".join(full_reply)}
+            )
+
+        except BaseException:
+            # Roll back partial messages if interrupted (e.g., Ctrl+C) or
+            # failed
+            del self.messages[checkpoint:]
+            raise
