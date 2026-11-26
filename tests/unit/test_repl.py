@@ -76,7 +76,7 @@ def test_cli_repl_handles_commands_and_exit(capsys) -> None:
         patch("builtins.input", side_effect=user_inputs),
         patch(
             "ollama_web_search.ollama_client.chat",
-            return_value={"role": "assistant", "content": "General Kenobi!"},
+            return_value=iter(["General", " Kenobi!"]),
         ),
     ):
         exit_code = cli.main([])

@@ -39,9 +39,14 @@ def test_tool_call_uses_injected_dispatcher():
         ],
     }
 
+    final_pass = {
+        "role": "assistant",
+        "content": "Linux 6.12",
+    }
+
     with patch(
         "ollama_web_search.ollama_client.chat",
-        side_effect=[first_pass, iter(["Linux ", "6.12"])],
+        side_effect=[first_pass, final_pass],
     ) as mock_chat:
         result = "".join(orch.run_turn("What is the latest Linux kernel?"))
 
