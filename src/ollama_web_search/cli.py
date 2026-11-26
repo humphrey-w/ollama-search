@@ -16,7 +16,8 @@ REPL_HELP = """Available commands:
   /help          Show this help message
   /clear, /reset Clear conversation history
   /history       Show message count in current session
-  /search on|off Toggle SearXNG web search
+  /search on|off Toggle web search
+  /thinking on|off Toggle visibility of model <think> reasoning
   /exit, /quit   Exit interactive chat (or press Ctrl+D)"""
 
 
@@ -24,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the command-line argument parser."""
     parser = argparse.ArgumentParser(
         prog="ask",
-        description="Query a local Ollama model with SearXNG web search.",
+        description="Query a local Ollama model with web search.",
     )
     parser.add_argument(
         "prompt",
@@ -51,7 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-search",
         action="store_true",
-        help="Disable SearXNG web search and query Ollama directly.",
+        help="Disable web search and query Ollama directly.",
+    )
+    parser.add_argument(
+        "--show-thinking",
+        action="store_true",
+        help="Show model reasoning (<think> blocks) instead of hiding them.",
     )
     return parser
 
@@ -96,6 +102,13 @@ def _handle_slash_command(command: str, orchestrator: Orchestrator) -> bool:
             print("Usage: /search on|off")
     elif cmd == "/help":
         print(REPL_HELP)
+    elif cmd == "/thinking":
+        if len(parts) == 2 and parts[1].lower() in {"on", "off"}:
+            orchestrator.show_thinking = parts[1].lower() == "on"
+            state = "shown" if orchestrator.show_thinking else "hidden"
+            print(f"\033[90m[Model thinking {state}]\033[0m")
+        else:
+            print("Usage: /thinking on|off")
     else:
         print(f"Unknown command '{cmd}'. Type /help for options.")
     return True
@@ -140,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     orchestrator = Orchestrator(
         model=args.model,
         enable_search=not args.no_search,
+        show_thinking=args.show_thinking,
     )
 
     initial_prompt = " ".join(args.prompt).strip()
