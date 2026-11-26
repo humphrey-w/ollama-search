@@ -135,6 +135,51 @@ class _MockOllamaHandler(BaseHTTPRequestHandler):
         return
 
 
+class _MockWebPageHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # pylint: disable=invalid-name
+        """Serve a simple HTML page or binary content for testing."""
+        if self.path == "/article":
+            html = (
+                "<html><head><title>Test</title><style>body{color:red;}"
+                "</style></head><body><nav>Menu</nav><h1>Release Notes</h1>"
+                "<p>Linux 6.12 introduces sched_ext support.</p>"
+                "<script>console.log('ignore me');</script></body></html>"
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+        elif self.path == "/binary":
+            data = b"\x89PNG\r\n\x1a\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:
+        # pylint: disable=redefined-builtin
+        return
+
+
+@pytest.fixture
+def mock_web_url() -> Iterator[str]:
+    """Start a temporary HTTP server serving mock pages for testing."""
+    server = HTTPServer(("127.0.0.1", 0), _MockWebPageHandler)
+    _, port = server.server_address
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 @pytest.fixture
 def mock_ollama_url() -> Iterator[tuple[str, list[list[dict]]]]:
     """Starts a temporary local HTTP server mimicking Ollama and yields
