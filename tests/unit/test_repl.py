@@ -9,12 +9,18 @@ def test_orchestrator_retains_multi_turn_history_and_resets() -> None:
     """Test that the Orchestrator retains multi-turn history and can reset."""
     orch = Orchestrator(model="llama3.1:8b")
 
+    turn1 = iter([{
+        "message": {"role": "assistant", "content": "Hi Alice!"},
+        "done": True
+    }])
+    turn2 = iter([{
+        "message": {"role": "assistant", "content": "Your name is Alice."},
+        "done": True
+    }])
+
     with patch(
-        "ollama_web_search.ollama_client.chat",
-        side_effect=[
-            {"role": "assistant", "content": "Hi Alice!"},
-            {"role": "assistant", "content": "Your name is Alice."},
-        ],
+        "ollama_web_search.ollama_client.chat_stream",
+        side_effect=[turn1, turn2],
     ):
         r1 = "".join(orch.run_turn("My name is Alice."))
         r2 = "".join(orch.run_turn("What is my name?"))
@@ -34,28 +40,32 @@ def test_orchestrator_rolls_back_on_interruption() -> None:
     interruption."""
     orch = Orchestrator(model="llama3.1:8b")
 
-    def _aborting_stream(*args, **kwargs):  # pylint: disable=unused-argument
-        if kwargs.get("stream"):
-            def _gen():
-                yield "Partial"
-                raise KeyboardInterrupt()
-            return _gen()
-        return {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [
-                {
+    pass1 = iter([
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
                     "function": {
                         "name": "web_search",
-                        "arguments": {"query": "test"},
+                        "arguments": {"query": "test"}
                     }
-                }
-            ],
+                }],
+            },
+            "done": True,
         }
+    ])
+
+    def _aborting_stream():
+        yield {
+            "message": {"role": "assistant", "content": "Partial"},
+            "done": False
+        }
+        raise KeyboardInterrupt()
 
     with (
-        patch("ollama_web_search.ollama_client.chat",
-              side_effect=_aborting_stream),
+        patch("ollama_web_search.ollama_client.chat_stream",
+              side_effect=[pass1, _aborting_stream()]),
         patch.object(orch.dispatcher, "dispatch", return_value="Some snippet"),
     ):
         try:
@@ -72,11 +82,22 @@ def test_cli_repl_handles_commands_and_exit(capsys) -> None:
     """Test that the CLI REPL handles commands and exits cleanly."""
     user_inputs = iter(["/search off", "/history", "Hello there", "/exit"])
 
+    stream = iter([
+        {
+            "message": {"role": "assistant", "content": "General "},
+            "done": False
+        },
+        {
+            "message": {"role": "assistant", "content": "Kenobi!"},
+            "done": True
+        },
+    ])
+
     with (
         patch("builtins.input", side_effect=user_inputs),
         patch(
-            "ollama_web_search.ollama_client.chat",
-            return_value=iter(["General", " Kenobi!"]),
+            "ollama_web_search.ollama_client.chat_stream",
+            return_value=stream,
         ),
     ):
         exit_code = cli.main([])

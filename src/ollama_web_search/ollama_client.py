@@ -11,18 +11,18 @@ class OllamaConnectionError(RuntimeError):
     """Raised when the local Ollama server cannot be reached."""
 
 
-def chat(
+def chat_stream(
     messages: list[dict[str, Any]],
     model: str,
     tools: list[dict[str, Any]] | None = None,
-    stream: bool = False,
-) -> dict[str, Any] | Iterator[str]:
-    """Send a chat request to Ollama server and return the response."""
+) -> Iterator[dict[str, Any]]:
+    """Send a streaming chat request to Ollama and yield parsed NDJSON
+    chunks."""
     url = f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat"
     payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
-        "stream": stream,
+        "stream": True,
     }
     if tools:
         payload["tools"] = tools
@@ -35,17 +35,21 @@ def chat(
 
     try:
         resp = urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT * 4)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="ignore")
+        raise OllamaConnectionError(
+            f"Ollama API error ({e.code}) at {url}: {detail or e.reason}"
+        ) from e
     except urllib.error.URLError as e:
         raise OllamaConnectionError(
             f"Could not connect to Ollama at {OLLAMA_BASE_URL}: {e.reason}"
         ) from e
 
-    if not stream:
-        with resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data.get("message", {})
-
-    return _stream_tokens(resp)
+    with resp:
+        for raw_line in resp:
+            if not raw_line.strip():
+                continue
+            yield json.loads(raw_line.decode("utf-8"))
 
 
 def _stream_tokens(resp: Any) -> Iterator[str]:

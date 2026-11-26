@@ -40,30 +40,44 @@ def test_orchestrator_chains_search_then_fetch_page(mock_web_url: str) -> None:
     dispatcher = create_tool_dispatcher()
     orch = Orchestrator(model="qwen3:8b", dispatcher=dispatcher)
 
-    pass1_search = {
-        "role": "assistant",
-        "content": "",
-        "tool_calls": [{
-            "function": {"name": "web_search",
-                         "arguments": {"query": "linux 6.12"}}
-        }],
-    }
-    pass2_fetch = {
-        "role": "assistant",
-        "content": "",
-        "tool_calls": [{
-            "function": {"name": "fetch_page",
-                         "arguments": {"url": f"{mock_web_url}/article"}}
-        }],
-    }
-    pass3_final = {
-        "role": "assistant",
-        "content": "It adds sched_ext.",
-    }
+    pass1_search = iter([
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"function": {
+                    "name": "web_search",
+                    "arguments": {"query": "linux 6.12"}}}],
+            },
+            "done": True,
+        }
+    ])
+    pass2_fetch = iter([
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"function": {
+                    "name": "fetch_page",
+                    "arguments": {"url": f"{mock_web_url}/article"}}}],
+            },
+            "done": True,
+        }
+    ])
+    pass3_final = iter([
+        {
+            "message": {"role": "assistant", "content": "It adds "},
+            "done": False
+        },
+        {
+            "message": {"role": "assistant", "content": "sched_ext."},
+            "done": True
+        },
+    ])
 
     with (
         patch(
-            "ollama_web_search.ollama_client.chat",
+            "ollama_web_search.ollama_client.chat_stream",
             side_effect=[pass1_search, pass2_fetch, pass3_final],
         ),
         patch(

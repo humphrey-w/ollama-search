@@ -78,7 +78,7 @@ class _MockOllamaHandler(BaseHTTPRequestHandler):
 
         # Turn 1, Pass 1: Trigger web_search
         if len(user_turns) == 1 and not has_tool_result:
-            body = json.dumps(
+            chunks = [
                 {
                     "message": {
                         "role": "assistant",
@@ -91,44 +91,40 @@ class _MockOllamaHandler(BaseHTTPRequestHandler):
                                 }
                             }
                         ],
-                    }
-                }
-            ).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        # Turn 1, Pass 2: Stream grounded answer
-        elif len(user_turns) == 1 and has_tool_result:
-            chunk = json.dumps(
-                {
-                    "message": {
-                        "role": "assistant", "content": "Kernel is 6.12."
                     },
                     "done": True,
                 }
-            ).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/x-ndjson")
-            self.send_header("Content-Length", str(len(chunk)))
-            self.end_headers()
-            self.wfile.write(chunk)
-        # Turn 2+: Direct reply demonstrating multi-turn context retention
+            ]
+        # Turn 1, Pass 2: Stream grounded answer
+        elif len(user_turns) == 1 and has_tool_result:
+            chunks = [
+                {
+                    "message": {"role": "assistant", "content": "Kernel is "},
+                    "done": False,
+                },
+                {
+                    "message": {"role": "assistant", "content": "6.12."},
+                    "done": True
+                },
+            ]
+        # Turn 2+: Stream direct reply proving multi-turn context retention
         else:
-            body = json.dumps(
+            chunks = [
                 {
                     "message": {
                         "role": "assistant",
                         "content": f"You previously asked: {user_turns[0]}",
-                    }
+                    },
+                    "done": True,
                 }
-            ).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            ]
+
+        ndjson_body = "\n".join(json.dumps(c) for c in chunks).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson")
+        self.send_header("Content-Length", str(len(ndjson_body)))
+        self.end_headers()
+        self.wfile.write(ndjson_body)
 
     def log_message(self, format: str, *args: object) -> None:
         # pylint: disable=redefined-builtin

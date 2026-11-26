@@ -55,28 +55,43 @@ class Orchestrator:
 
         try:
             iterations = 0
-            while (
-                active_schemas
-                and self.dispatcher
-                and iterations < MAX_TOOL_ITERATIONS
-            ):
-                response_msg = ollama_client.chat(
+            while True:
+                tools_for_pass = (
+                    active_schemas
+                    if (
+                        active_schemas
+                        and self.dispatcher
+                        and iterations < MAX_TOOL_ITERATIONS
+                    )
+                    else None
+                )
+
+                full_reply: list[str] = []
+                tool_calls: list[dict[str, Any]] = []
+
+                for chunk in ollama_client.chat_stream(
                     messages=self.messages,
                     model=self.model,
-                    tools=active_schemas,
-                    stream=False,
-                )
-                assert isinstance(response_msg, dict)
-                tool_calls = response_msg.get("tool_calls") or []
+                    tools=tools_for_pass,
+                ):
+                    msg = chunk.get("message", {})
+                    if content := msg.get("content"):
+                        full_reply.append(content)
+                        yield content
+                    if calls := msg.get("tool_calls"):
+                        tool_calls.extend(calls)
 
-                if not tool_calls:
-                    self.messages.append(response_msg)
-                    direct_reply = response_msg.get("content", "")
-                    if direct_reply:
-                        yield direct_reply
+                assistant_msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": "".join(full_reply),
+                }
+                if tool_calls:
+                    assistant_msg["tool_calls"] = tool_calls
+                self.messages.append(assistant_msg)
+
+                if not tool_calls or not self.dispatcher:
                     return
 
-                self.messages.append(response_msg)
                 for call in tool_calls:
                     fn = call.get("function", {})
                     name = fn.get("name", "")
@@ -87,29 +102,10 @@ class Orchestrator:
 
                     tool_output = self.dispatcher.dispatch(name, args)
                     self.messages.append({
-                        "role": "tool",
-                        "content": tool_output
+                        "role": "tool", "content": tool_output
                     })
 
                 iterations += 1
-
-            # Final synthesis pass (streamed, tools omitted to guarantee
-            # completion)
-            token_stream = ollama_client.chat(
-                messages=self.messages,
-                model=self.model,
-                tools=None,
-                stream=True,
-            )
-            full_reply: list[str] = []
-            for token in token_stream:
-                full_reply.append(token)
-                yield token
-
-            self.messages.append({
-                "role": "assistant",
-                "content": "".join(full_reply)
-            })
 
         except BaseException:
             del self.messages[checkpoint:]

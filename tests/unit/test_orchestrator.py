@@ -10,9 +10,13 @@ def test_direct_reply_without_tool_call():
     model without invoking any tools."""
     orch = Orchestrator(model="llama3.1:8b")
 
+    stream = iter([
+        {"message": {"role": "assistant", "content": "4"}, "done": True},
+    ])
+
     with patch(
-        "ollama_web_search.ollama_client.chat",
-        return_value={"role": "assistant", "content": "4"},
+        "ollama_web_search.ollama_client.chat_stream",
+        return_value=stream,
     ) as mock_chat:
         result = "".join(orch.run_turn("What is 2 + 2?"))
 
@@ -26,32 +30,46 @@ def test_tool_call_uses_injected_dispatcher():
     dispatcher = create_tool_dispatcher()
     orch = Orchestrator(model="llama3.1:8b", dispatcher=dispatcher)
 
-    first_pass = {
-        "role": "assistant",
-        "content": "",
-        "tool_calls": [
-            {
-                "function": {
-                    "name": "web_search",
-                    "arguments": {"query": "latest kernel"},
-                }
-            }
-        ],
-    }
+    pass1 = iter([
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "web_search",
+                            "arguments": {"query": "latest kernel"},
+                        }
+                    }
+                ],
+            },
+            "done": True,
+        }
+    ])
+    pass2 = iter([
+        {"message": {"role": "assistant", "content": "Linux "}, "done": False},
+        {"message": {"role": "assistant", "content": "6.12"}, "done": True},
+    ])
 
-    final_pass = {
-        "role": "assistant",
-        "content": "Linux 6.12",
-    }
-
-    with patch(
-        "ollama_web_search.ollama_client.chat",
-        side_effect=[first_pass, final_pass],
-    ) as mock_chat:
+    with (
+        patch(
+            "ollama_web_search.ollama_client.chat_stream",
+            side_effect=[pass1, pass2]
+        ) as mock_chat,
+        patch.object(
+            dispatcher,
+            "dispatch",
+            return_value=(
+                "Title: Kernel\nURL: https://kernel.org\nSnippet: 6.12"
+            ),
+        ) as mock_dispatch,
+    ):
         result = "".join(orch.run_turn("What is the latest Linux kernel?"))
 
     assert result == "Linux 6.12"
+    mock_dispatch.assert_called_once_with(
+        "web_search",
+        {"query": "latest kernel"}
+    )
     assert mock_chat.call_count == 2
-    tool_msgs = [m for m in orch.messages if m["role"] == "tool"]
-    assert len(tool_msgs) == 1
-    assert "Active kernel releases" in tool_msgs[0]["content"]
