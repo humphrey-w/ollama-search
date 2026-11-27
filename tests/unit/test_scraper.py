@@ -13,25 +13,30 @@ def test_fetch_page_extracts_clean_text_and_strips_scripts(
     scripts, styles, and navigation elements."""
     result = fetch_page(f"{mock_web_url}/article")
 
-    assert "Release Notes" in result
-    assert "Linux 6.12 introduces sched_ext support." in result
-    assert "console.log" not in result
-    assert "color:red" not in result
-    assert "Menu" not in result
+    assert "Release Notes" in result.text
+    assert "Linux 6.12 introduces sched_ext support." in result.text
+    assert "console.log" not in result.text
+    assert "color:red" not in result.text
+    assert "Menu" not in result.text
+    assert len(result.sources) == 1
+    assert result.sources[0].url == f"{mock_web_url}/article"
+    assert result.sources[0].title == "Test"
 
 
 def test_fetch_page_truncates_long_content(mock_web_url: str) -> None:
     """Test that fetch_page truncates the extracted text to the specified
     maximum number of characters and appends a truncation notice."""
     result = fetch_page(f"{mock_web_url}/article", max_chars=25)
-    assert "[Content truncated at 25 characters]" in result
+    assert "[Content truncated at 25 characters]" in result.text
 
 
 def test_fetch_page_rejects_invalid_scheme_and_binary_content(
         mock_web_url: str) -> None:
     """Test that fetch_page rejects URLs with invalid schemes (like file://)"""
-    assert "Invalid URL" in fetch_page("file:///etc/passwd")
-    assert "Unsupported content type" in fetch_page(f"{mock_web_url}/binary")
+    assert "Invalid URL" in fetch_page("file:///etc/passwd").text
+    assert "Unsupported content type" in fetch_page(
+        f"{mock_web_url}/binary"
+    ).text
 
 
 def test_orchestrator_chains_search_then_fetch_page(mock_web_url: str) -> None:
