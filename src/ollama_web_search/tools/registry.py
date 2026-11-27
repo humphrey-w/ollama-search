@@ -2,13 +2,15 @@
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from ollama_web_search.models import ToolResult
+
 
 @dataclass(frozen=True)
 class RegisteredTool:
     """Represents a registered tool with its schema and handler."""
     name: str
     schema: dict[str, Any]
-    handler: Callable[..., str]
+    handler: Callable[..., str | ToolResult]
 
 
 class ToolRegistry:
@@ -18,7 +20,7 @@ class ToolRegistry:
         self._tools: dict[str, RegisteredTool] = {}
 
     def register(self, schema: dict[str, Any],
-                 handler: Callable[..., str]) -> None:
+                 handler: Callable[..., str | ToolResult]) -> None:
         """Register a tool with its schema and handler function."""
         name = schema.get("function", {}).get("name")
         if not name:

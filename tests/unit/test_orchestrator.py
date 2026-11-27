@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from ollama_web_search.orchestrator import Orchestrator
 from ollama_web_search.tools import create_tool_dispatcher
+from ollama_web_search.models import ToolResult
 
 
 def test_direct_reply_without_tool_call():
@@ -60,7 +61,7 @@ def test_tool_call_uses_injected_dispatcher():
         patch.object(
             dispatcher,
             "dispatch",
-            return_value=(
+            return_value=ToolResult(
                 "Title: Kernel\nURL: https://kernel.org\nSnippet: 6.12"
             ),
         ) as mock_dispatch,
@@ -78,7 +79,7 @@ def test_tool_call_uses_injected_dispatcher():
 def test_tool_callbacks_receive_status_and_result():
     """Test that tool activity callbacks receive status and dispatch output."""
     statuses: list[str] = []
-    results: list[tuple[str, dict, str]] = []
+    results: list[tuple[str, dict, ToolResult]] = []
     dispatcher = create_tool_dispatcher()
     orch = Orchestrator(
         model="llama3.1:8b",
@@ -115,7 +116,9 @@ def test_tool_callbacks_receive_status_and_result():
         patch.object(
             dispatcher,
             "dispatch",
-            return_value="Title: Rich\nURL: https://example.com\nSnippet: Demo",
+            return_value=ToolResult(
+                "Title: Rich\nURL: https://example.com\nSnippet: Demo"
+            ),
         ),
     ):
         assert "".join(orch.run_turn("Search this")) == "Done"
@@ -124,5 +127,5 @@ def test_tool_callbacks_receive_status_and_result():
     assert results == [(
         "web_search",
         {"query": "terminal markdown"},
-        "Title: Rich\nURL: https://example.com\nSnippet: Demo",
+        ToolResult("Title: Rich\nURL: https://example.com\nSnippet: Demo"),
     )]

@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from ollama_web_search.orchestrator import Orchestrator
 from ollama_web_search.tools import create_tool_dispatcher
+from ollama_web_search.models import Source, ToolResult
 from ollama_web_search.tools.scraper import fetch_page
 
 
@@ -75,14 +76,28 @@ def test_orchestrator_chains_search_then_fetch_page(mock_web_url: str) -> None:
         },
     ])
 
+    original_dispatch = dispatcher.dispatch
+    search_result = ToolResult(
+        text=f"URL: {mock_web_url}/article",
+        sources=(Source(
+            title="Linux Release Notes",
+            url=f"{mock_web_url}/article",
+        ),),
+    )
+
     with (
         patch(
             "ollama_web_search.ollama_client.chat_stream",
             side_effect=[pass1_search, pass2_fetch, pass3_final],
         ),
-        patch(
-            "ollama_web_search.tools.searxng.search",
-            return_value=f"URL: {mock_web_url}/article"
+        patch.object(
+            dispatcher,
+            "dispatch",
+            side_effect=lambda name, args: (
+                search_result
+                if name == "web_search"
+                else original_dispatch(name, args)
+            ),
         ),
     ):
         reply = "".join(orch.run_turn("Summarize Linux 6.12 release notes"))

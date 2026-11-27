@@ -13,4 +13,8 @@ def create_tool_dispatcher() -> ToolDispatcher:
     return ToolDispatcher(registry)
 
 
-__all__ = ["ToolRegistry", "ToolDispatcher", "create_tool_dispatcher"]
+__all__ = [
+    "ToolRegistry",
+    "ToolDispatcher",
+    "create_tool_dispatcher",
+]

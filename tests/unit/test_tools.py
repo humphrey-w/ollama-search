@@ -2,6 +2,7 @@
 import pytest
 from ollama_web_search.tools.dispatcher import ToolDispatcher
 from ollama_web_search.tools.registry import ToolRegistry
+from ollama_web_search.models import Source, ToolResult
 
 SAMPLE_SCHEMA = {
     "type": "function",
@@ -41,7 +42,10 @@ def test_dispatcher_executes_registered_tool():
     registry.register(SAMPLE_SCHEMA, lambda text: f"echo: {text}")
     dispatcher = ToolDispatcher(registry)
 
-    assert dispatcher.dispatch("echo_tool", {"text": "hello"}) == "echo: hello"
+    assert dispatcher.dispatch(
+        "echo_tool",
+        {"text": "hello"},
+    ).text == "echo: hello"
 
 
 def test_dispatcher_handles_unknown_tool_and_bad_args():
@@ -51,6 +55,24 @@ def test_dispatcher_handles_unknown_tool_and_bad_args():
     registry.register(SAMPLE_SCHEMA, lambda text: f"echo: {text}")
     dispatcher = ToolDispatcher(registry)
 
-    assert "Unknown tool" in dispatcher.dispatch("missing_tool", {})
-    assert "Error executing" in dispatcher.dispatch("echo_tool",
-                                                    {"wrong_param": 123})
+    assert "Unknown tool" in dispatcher.dispatch("missing_tool", {}).text
+    assert "Error executing" in dispatcher.dispatch(
+        "echo_tool",
+        {"wrong_param": 123},
+    ).text
+
+
+def test_dispatcher_preserves_structured_results():
+    """Test that dispatch returns text and source metadata together."""
+    registry = ToolRegistry()
+    result = ToolResult(
+        "Title: Example\nURL: https://example.com",
+        sources=(Source("Example", "https://example.com"),),
+    )
+    registry.register(SAMPLE_SCHEMA, lambda text: result)
+    dispatcher = ToolDispatcher(registry)
+
+    assert dispatcher.dispatch(
+        "echo_tool",
+        {"text": "hello"},
+    ) == result

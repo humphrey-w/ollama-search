@@ -7,6 +7,7 @@ from typing import Any, Iterator
 from ollama_web_search import ollama_client
 from ollama_web_search.config import (DEFAULT_MODEL, SYSTEM_PROMPT,
                                       MAX_TOOL_ITERATIONS)
+from ollama_web_search.models import ToolResult
 from ollama_web_search.tools import ToolDispatcher, create_tool_dispatcher
 
 
@@ -102,7 +103,9 @@ class Orchestrator:
         show_thinking: bool = False,
         dispatcher: ToolDispatcher | None = None,
         on_tool_status: Callable[[str], None] | None = None,
-        on_tool_result: Callable[[str, dict[str, Any], str], None] | None = None,
+        on_tool_result: Callable[
+            [str, dict[str, Any], ToolResult], None
+        ] | None = None,
     ) -> None:
         self.model = model
         self.enable_search = enable_search
@@ -214,12 +217,20 @@ class Orchestrator:
                     else:
                         print(f"\033[90m{status}\033[0m", file=sys.stderr)
 
-                    tool_output = self.dispatcher.dispatch(name, args)
+                    tool_output = self.dispatcher.dispatch(
+                        name,
+                        args,
+                    )
                     if self.on_tool_result:
                         self.on_tool_result(name, args, tool_output)
+                    tool_text = (
+                        tool_output.text
+                        if isinstance(tool_output, ToolResult)
+                        else tool_output
+                    )
                     self.messages.append({
                         "role": "tool",
-                        "content": tool_output
+                        "content": tool_text
                     })
 
                 iterations += 1

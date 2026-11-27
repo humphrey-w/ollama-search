@@ -1,7 +1,6 @@
 """The entry point for the Ollama Search CLI."""
 import argparse
 import os
-import re
 import sys
 
 try:
@@ -13,6 +12,7 @@ except ImportError:
 from ollama_web_search.config import DEFAULT_MODEL
 from ollama_web_search.ollama_client import OllamaConnectionError
 from ollama_web_search.orchestrator import Orchestrator
+from ollama_web_search.models import Source, ToolResult
 
 try:
     from rich.console import Console
@@ -85,21 +85,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _extract_search_sources(output: str) -> list[tuple[str, str]]:
-    """Extract title and URL pairs from formatted search output."""
-    pattern = re.compile(
-        r"Title:\s*(.*?)\nURL:\s*(.*?)\nSnippet:\s*(.*?)(?=\n\nTitle:|\Z)",
-        re.DOTALL,
-    )
-    sources: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for title, url, _snippet in pattern.findall(output):
-        title = title.strip() or "Untitled"
-        url = url.strip()
-        if url and url not in seen:
-            seen.add(url)
-            sources.append((title, url))
-    return sources
+def _add_source_citations(
+    answer: str,
+    sources: list[Source],
+) -> str:
+    """Convert source URLs cited by the model into numbered Markdown links."""
+    cited = answer
+    for index, source in enumerate(sources, start=1):
+        cited = cited.replace(
+            source.url,
+            f"[{index}]({source.url})",
+        )
+    return cited
 
 
 def _execute_turn(
@@ -118,7 +115,7 @@ def _execute_turn(
         and "NO_COLOR" not in os.environ
     )
     rich_no_color = no_color or "NO_COLOR" in os.environ
-    sources: list[tuple[str, str]] = []
+    sources: list[Source] = []
     status_live = None
 
     if use_rich:
@@ -137,16 +134,26 @@ def _execute_turn(
             )
             status_live.start()
 
-        def on_result(name: str, _args: dict, output: str) -> None:
+        def on_result(
+            name: str,
+            _args: dict,
+            output: str | ToolResult,
+        ) -> None:
             nonlocal status_live
             if status_live is not None:
                 status_live.stop()
                 status_live = None
-            if name == "web_search":
-                for source in _extract_search_sources(output):
-                    if source not in sources:
+            if isinstance(output, ToolResult):
+                for source in output.sources:
+                    if not any(
+                        existing.url == source.url
+                        for existing in sources
+                    ):
                         sources.append(source)
-            if "error" not in output.lower():
+                result_text = output.text
+            else:
+                result_text = output
+            if "error" not in result_text.lower():
                 status_console.print(
                     Text(f"✓ {name.replace('_', ' ').title()} complete",
                          style="dim")
@@ -158,10 +165,18 @@ def _execute_turn(
             else:
                 print(f"\033[90m{status}\033[0m", file=sys.stderr)
 
-        def on_result(name: str, _args: dict, output: str) -> None:
-            if name == "web_search":
-                for source in _extract_search_sources(output):
-                    if source not in sources:
+        def on_result(
+            name: str,
+            _args: dict,
+            output: str | ToolResult,
+        ) -> None:
+            del name
+            if isinstance(output, ToolResult):
+                for source in output.sources:
+                    if not any(
+                        existing.url == source.url
+                        for existing in sources
+                    ):
                         sources.append(source)
 
     orchestrator.on_tool_status = on_status
@@ -187,7 +202,7 @@ def _execute_turn(
                 if status_live is not None:
                     status_live.stop()
                     status_live = None
-            console.print(Markdown(answer))
+            console.print(Markdown(_add_source_citations(answer, sources)))
         else:
             answer = ""
             for chunk in orchestrator.run_turn(prompt):
@@ -199,12 +214,14 @@ def _execute_turn(
             if use_rich:
                 console.print()
                 console.print("[bold]Sources[/bold]")
-                for index, (title, url) in enumerate(sources, start=1):
-                    console.print(Markdown(f"{index}. [{title}]({url})"))
+                for index, source in enumerate(sources, start=1):
+                    console.print(Markdown(
+                        f"{index}. [{source.title}]({source.url})"
+                    ))
             else:
                 print("\nSources:")
-                for index, (title, url) in enumerate(sources, start=1):
-                    print(f"{index}. {title} — {url}")
+                for index, source in enumerate(sources, start=1):
+                    print(f"{index}. {source.title} — {source.url}")
         return True
     except OllamaConnectionError as e:
         print(f"\nError: {e}", file=sys.stderr)

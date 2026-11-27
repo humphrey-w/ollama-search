@@ -17,11 +17,12 @@ def test_dispatcher_registry_and_searxng_search(mock_searxng_url: str) -> None:
             "web_search",
             {"query": "python hatchling tutorial", "max_results": 1},
         )
-
-    assert "Title: Docs for python hatchling tutorial" in output
-    assert "URL: https://example.org" in output
-    assert "Snippet: Detailed guide about python hatchling tutorial." in output
-    assert "Secondary Source" not in output
+    assert "Title: Docs for python hatchling tutorial" in output.text
+    assert "URL: https://example.org" in output.text
+    assert "Snippet: Detailed guide about python hatchling tutorial." in output.text
+    assert "Secondary Source" not in output.text
+    assert len(output.sources) == 1
+    assert output.sources[0].url == "https://example.org"
 
 
 def test_dispatcher_searxng_empty_results(mock_searxng_url: str) -> None:
@@ -33,7 +34,7 @@ def test_dispatcher_searxng_empty_results(mock_searxng_url: str) -> None:
                mock_searxng_url):
         output = dispatcher.dispatch("web_search", {"query": "empty_query"})
 
-    assert output == "No search results found."
+    assert output.text == "No search results found."
 
 
 def test_dispatcher_handles_unreachable_searxng() -> None:
@@ -44,4 +45,4 @@ def test_dispatcher_handles_unreachable_searxng() -> None:
                "http://127.0.0.1:9"):
         output = dispatcher.dispatch("web_search", {"query": "test"})
 
-    assert output.startswith("Search error (SearXNG unreachable):")
+    assert output.text.startswith("Search error (SearXNG unreachable):")

@@ -17,5 +17,6 @@ SYSTEM_PROMPT = (
     "Use web_search to find relevant pages for current events or new facts. "
     "If search snippets lack enough detail, use fetch_page on a promising URL "
     "to read the full content. "
-    "Cite source URLs briefly at the end."
+    "When citing search results, include the source URL and briefly identify "
+    "the source."
 )

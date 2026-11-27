@@ -66,7 +66,11 @@ def test_orchestrator_rolls_back_on_interruption() -> None:
     with (
         patch("ollama_web_search.ollama_client.chat_stream",
               side_effect=[pass1, _aborting_stream()]),
-        patch.object(orch.dispatcher, "dispatch", return_value="Some snippet"),
+        patch.object(
+            orch.dispatcher,
+            "dispatch",
+            return_value=cli.ToolResult("Some snippet"),
+        ),
     ):
         try:
             list(orch.run_turn("Trigger search"))
@@ -109,15 +113,16 @@ def test_cli_repl_handles_commands_and_exit(capsys) -> None:
     assert "General Kenobi!" in captured
 
 
-def test_search_sources_are_extracted_and_deduplicated() -> None:
-    """Test parsing formatted web search results for source presentation."""
-    output = (
-        "Title: Python\nURL: https://python.org\nSnippet: Official docs\n\n"
-        "Title: Python\nURL: https://python.org\nSnippet: Duplicate\n\n"
-        "Title: Testing\nURL: https://pytest.org\nSnippet: Test framework"
+def test_answer_urls_are_replaced_with_numbered_citations() -> None:
+    """Test that source URLs in answers become numbered Markdown links."""
+    sources = [
+        cli.Source(title="Python", url="https://python.org"),
+        cli.Source(title="Testing", url="https://pytest.org"),
+    ]
+
+    answer = cli._add_source_citations(
+        "See https://python.org and https://pytest.org.",
+        sources,
     )
 
-    assert cli._extract_search_sources(output) == [
-        ("Python", "https://python.org"),
-        ("Testing", "https://pytest.org"),
-    ]
+    assert answer == "See [1](https://python.org) and [2](https://pytest.org)."
