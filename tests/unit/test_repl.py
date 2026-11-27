@@ -107,3 +107,17 @@ def test_cli_repl_handles_commands_and_exit(capsys) -> None:
     assert "[Web search disabled]" in captured
     assert "[Turns: 0 | Messages in context: 1]" in captured
     assert "General Kenobi!" in captured
+
+
+def test_search_sources_are_extracted_and_deduplicated() -> None:
+    """Test parsing formatted web search results for source presentation."""
+    output = (
+        "Title: Python\nURL: https://python.org\nSnippet: Official docs\n\n"
+        "Title: Python\nURL: https://python.org\nSnippet: Duplicate\n\n"
+        "Title: Testing\nURL: https://pytest.org\nSnippet: Test framework"
+    )
+
+    assert cli._extract_search_sources(output) == [
+        ("Python", "https://python.org"),
+        ("Testing", "https://pytest.org"),
+    ]

@@ -1,6 +1,7 @@
 """Orchestrator for managing the interaction between the user, the model, and
 the tools."""
 import sys
+from collections.abc import Callable
 from typing import Any, Iterator
 
 from ollama_web_search import ollama_client
@@ -100,11 +101,15 @@ class Orchestrator:
         enable_search: bool = True,
         show_thinking: bool = False,
         dispatcher: ToolDispatcher | None = None,
+        on_tool_status: Callable[[str], None] | None = None,
+        on_tool_result: Callable[[str, dict[str, Any], str], None] | None = None,
     ) -> None:
         self.model = model
         self.enable_search = enable_search
         self.show_thinking = show_thinking
         self.dispatcher = dispatcher or create_tool_dispatcher()
+        self.on_tool_status = on_tool_status
+        self.on_tool_result = on_tool_result
         self.messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT}
         ]
@@ -204,9 +209,14 @@ class Orchestrator:
                     args = fn.get("arguments", {})
 
                     status = self._format_status(name, args)
-                    print(f"\033[90m{status}\033[0m", file=sys.stderr)
+                    if self.on_tool_status:
+                        self.on_tool_status(status)
+                    else:
+                        print(f"\033[90m{status}\033[0m", file=sys.stderr)
 
                     tool_output = self.dispatcher.dispatch(name, args)
+                    if self.on_tool_result:
+                        self.on_tool_result(name, args, tool_output)
                     self.messages.append({
                         "role": "tool",
                         "content": tool_output

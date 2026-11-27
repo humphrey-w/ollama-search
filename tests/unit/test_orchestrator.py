@@ -73,3 +73,56 @@ def test_tool_call_uses_injected_dispatcher():
         {"query": "latest kernel"}
     )
     assert mock_chat.call_count == 2
+
+
+def test_tool_callbacks_receive_status_and_result():
+    """Test that tool activity callbacks receive status and dispatch output."""
+    statuses: list[str] = []
+    results: list[tuple[str, dict, str]] = []
+    dispatcher = create_tool_dispatcher()
+    orch = Orchestrator(
+        model="llama3.1:8b",
+        dispatcher=dispatcher,
+        on_tool_status=statuses.append,
+        on_tool_result=lambda name, args, output: results.append(
+            (name, args, output)
+        ),
+    )
+
+    pass1 = iter([{
+        "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "function": {
+                    "name": "web_search",
+                    "arguments": {"query": "terminal markdown"},
+                }
+            }],
+        },
+        "done": True,
+    }])
+    pass2 = iter([{
+        "message": {"role": "assistant", "content": "Done"},
+        "done": True,
+    }])
+
+    with (
+        patch(
+            "ollama_web_search.ollama_client.chat_stream",
+            side_effect=[pass1, pass2],
+        ),
+        patch.object(
+            dispatcher,
+            "dispatch",
+            return_value="Title: Rich\nURL: https://example.com\nSnippet: Demo",
+        ),
+    ):
+        assert "".join(orch.run_turn("Search this")) == "Done"
+
+    assert statuses == ["[Searching: terminal markdown...]"]
+    assert results == [(
+        "web_search",
+        {"query": "terminal markdown"},
+        "Title: Rich\nURL: https://example.com\nSnippet: Demo",
+    )]

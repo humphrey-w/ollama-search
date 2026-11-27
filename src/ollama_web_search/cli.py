@@ -1,5 +1,7 @@
 """The entry point for the Ollama Search CLI."""
 import argparse
+import os
+import re
 import sys
 
 try:
@@ -11,6 +13,17 @@ except ImportError:
 from ollama_web_search.config import DEFAULT_MODEL
 from ollama_web_search.ollama_client import OllamaConnectionError
 from ollama_web_search.orchestrator import Orchestrator
+
+try:
+    from rich.console import Console
+    from rich.live import Live
+    from rich.markdown import Markdown
+    from rich.text import Text
+except ImportError:
+    Console = None
+    Live = None
+    Markdown = None
+    Text = None
 
 REPL_HELP = """Available commands:
   /help          Show this help message
@@ -59,16 +72,139 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show model reasoning (<think> blocks) instead of hiding them.",
     )
+    parser.add_argument(
+        "--plain",
+        action="store_true",
+        help="Disable Rich terminal formatting.",
+    )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable ANSI colors while keeping terminal formatting.",
+    )
     return parser
 
 
-def _execute_turn(orchestrator: Orchestrator, prompt: str) -> bool:
+def _extract_search_sources(output: str) -> list[tuple[str, str]]:
+    """Extract title and URL pairs from formatted search output."""
+    pattern = re.compile(
+        r"Title:\s*(.*?)\nURL:\s*(.*?)\nSnippet:\s*(.*?)(?=\n\nTitle:|\Z)",
+        re.DOTALL,
+    )
+    sources: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for title, url, _snippet in pattern.findall(output):
+        title = title.strip() or "Untitled"
+        url = url.strip()
+        if url and url not in seen:
+            seen.add(url)
+            sources.append((title, url))
+    return sources
+
+
+def _execute_turn(
+    orchestrator: Orchestrator,
+    prompt: str,
+    *,
+    plain: bool = False,
+    no_color: bool = False,
+) -> bool:
     """Stream a single turn to stdout. Returns False on fatal connection
     error."""
+    use_rich = (
+        not plain
+        and Console is not None
+        and sys.stdout.isatty()
+        and "NO_COLOR" not in os.environ
+    )
+    rich_no_color = no_color or "NO_COLOR" in os.environ
+    sources: list[tuple[str, str]] = []
+    status_live = None
+
+    if use_rich:
+        console = Console(no_color=rich_no_color)
+        status_console = Console(stderr=True, no_color=rich_no_color)
+
+        def on_status(status: str) -> None:
+            nonlocal status_live
+            if status_live is not None:
+                status_live.stop()
+            status_live = Live(
+                Text(status, style="dim"),
+                console=status_console,
+                transient=True,
+                refresh_per_second=12,
+            )
+            status_live.start()
+
+        def on_result(name: str, _args: dict, output: str) -> None:
+            nonlocal status_live
+            if status_live is not None:
+                status_live.stop()
+                status_live = None
+            if name == "web_search":
+                for source in _extract_search_sources(output):
+                    if source not in sources:
+                        sources.append(source)
+            if "error" not in output.lower():
+                status_console.print(
+                    Text(f"✓ {name.replace('_', ' ').title()} complete",
+                         style="dim")
+                )
+    else:
+        def on_status(status: str) -> None:
+            if no_color or plain:
+                print(status, file=sys.stderr)
+            else:
+                print(f"\033[90m{status}\033[0m", file=sys.stderr)
+
+        def on_result(name: str, _args: dict, output: str) -> None:
+            if name == "web_search":
+                for source in _extract_search_sources(output):
+                    if source not in sources:
+                        sources.append(source)
+
+    orchestrator.on_tool_status = on_status
+    orchestrator.on_tool_result = on_result
+
     try:
-        for chunk in orchestrator.run_turn(prompt):
-            print(chunk, end="", flush=True)
-        print()
+        if use_rich:
+            console.print("[bold cyan]Assistant[/bold cyan]")
+            answer = ""
+            live = Live(
+                Markdown(""),
+                console=console,
+                transient=True,
+                refresh_per_second=12,
+            )
+            live.start()
+            try:
+                for chunk in orchestrator.run_turn(prompt):
+                    answer += chunk
+                    live.update(Markdown(answer), refresh=True)
+            finally:
+                live.stop()
+                if status_live is not None:
+                    status_live.stop()
+                    status_live = None
+            console.print(Markdown(answer))
+        else:
+            answer = ""
+            for chunk in orchestrator.run_turn(prompt):
+                answer += chunk
+                print(chunk, end="", flush=True)
+            print()
+
+        if sources:
+            if use_rich:
+                console.print()
+                console.print("[bold]Sources[/bold]")
+                for index, (title, url) in enumerate(sources, start=1):
+                    console.print(Markdown(f"{index}. [{title}]({url})"))
+            else:
+                print("\nSources:")
+                for index, (title, url) in enumerate(sources, start=1):
+                    print(f"{index}. {title} — {url}")
         return True
     except OllamaConnectionError as e:
         print(f"\nError: {e}", file=sys.stderr)
@@ -114,7 +250,12 @@ def _handle_slash_command(command: str, orchestrator: Orchestrator) -> bool:
     return True
 
 
-def run_repl(orchestrator: Orchestrator) -> int:
+def run_repl(
+    orchestrator: Orchestrator,
+    *,
+    plain: bool = False,
+    no_color: bool = False,
+) -> int:
     """Run an interactive multi-turn terminal chat loop."""
     search_status = "on" if orchestrator.enable_search else "off"
     print(
@@ -141,7 +282,12 @@ def run_repl(orchestrator: Orchestrator) -> int:
                 return 0
             continue
 
-        _execute_turn(orchestrator, user_input)
+        _execute_turn(
+            orchestrator,
+            user_input,
+            plain=plain,
+            no_color=no_color,
+        )
         print()
 
 
@@ -160,15 +306,33 @@ def main(argv: list[str] | None = None) -> int:
 
     # Single-turn mode when a prompt is given without --chat
     if initial_prompt and not args.chat:
-        return 0 if _execute_turn(orchestrator, initial_prompt) else 2
+        return (
+            0
+            if _execute_turn(
+                orchestrator,
+                initial_prompt,
+                plain=args.plain,
+                no_color=args.no_color,
+            )
+            else 2
+        )
 
     # Multi-turn interactive mode
     if initial_prompt:
-        if not _execute_turn(orchestrator, initial_prompt):
+        if not _execute_turn(
+            orchestrator,
+            initial_prompt,
+            plain=args.plain,
+            no_color=args.no_color,
+        ):
             return 2
         print()
 
-    return run_repl(orchestrator)
+    return run_repl(
+        orchestrator,
+        plain=args.plain,
+        no_color=args.no_color,
+    )
 
 
 if __name__ == "__main__":
